@@ -1,0 +1,58 @@
+body {
+  font-family: Arial, sans-serif;
+  background-color: #121212;
+  color: #e0e0e0;
+  margin: 0;
+  padding: 10px;
+}
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  max-width: 600px;
+  margin: 0 auto;
+}
+.painel {
+  background: #1e1e1e;
+  padding: 15px;
+  border-radius: 8px;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+}
+input, button {
+  padding: 10px;
+  font-size: 16px;
+  border-radius: 5px;
+  border: 1px solid #444;
+  background: #2d2d2d;
+  color: #fff;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 5px;
+}
+button {
+  background: #007acc;
+  cursor: pointer;
+  font-weight: bold;
+  border: none;
+}
+button:hover { background: #005999; }
+.bobina-termica {
+  width: 100%;
+  max-width: 320px;
+  margin: 10px auto;
+  background-color: #fffdfa;
+  color: #111;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 12px;
+  padding: 15px 10px;
+  border-top: 3px dashed #bbb;
+  border-bottom: 3px dashed #bbb;
+}
+.modal {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0,0,0,0.8); display: none;
+  justify-content: center; align-items: center;
+}
+.modal-content {
+  background: #252525; padding: 20px; border-radius: 8px; width: 90%; max-width: 400px;
+}
