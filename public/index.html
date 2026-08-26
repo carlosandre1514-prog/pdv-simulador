@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PDV Simulador - Caixa</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; background: #121212; color: #fff; margin: 0; padding: 20px; }
+    .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #333; padding-bottom: 15px; margin-bottom: 20px; }
+    .btn-camera { background: #00e676; color: #000; border: none; padding: 12px 20px; font-weight: bold; border-radius: 8px; cursor: pointer; font-size: 1rem; }
+    .btn-camera:hover { background: #00c853; }
+    .grid { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; }
+    .card { background: #1e1e1e; padding: 20px; border-radius: 12px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { padding: 12px; border-bottom: 1px solid #333; text-align: left; }
+    th { background: #2a2a2a; color: #00e676; }
+    .total-box { text-align: right; font-size: 1.8rem; color: #00e676; font-weight: bold; margin-top: 20px; }
+    .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 9999; justify-content: center; align-items: center; }
+    .modal-content { background: #1e1e1e; padding: 30px; border-radius: 12px; text-align: center; max-width: 360px; width: 90%; }
+    #qrcode-target { display: inline-block; padding: 12px; background: #fff; border-radius: 8px; margin: 15px 0; }
+    .btn-close { background: #ff5252; color: #fff; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>PDV - Caixa Aberto</h1>
+    <button class="btn-camera" onclick="abrirModalCamera()">📷 Usar Câmera do Celular</button>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Itens no Carrinho</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Código de Barras</th>
+            <th>Qtd</th>
+            <th>Hora</th>
+          </tr>
+        </thead>
+        <tbody id="carrinho-list"></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>Resumo</h2>
+      <p style="color: #aaa;">Último escaneado:</p>
+      <h3 id="last-code" style="color: #00e676; font-size: 1.3rem;">Aguardando...</h3>
+      <div class="total-box">
+        Total Itens: <span id="total-itens">0</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-qrcode" class="modal-overlay">
+    <div class="modal-content">
+      <h3 style="margin: 0;">Parear Celular</h3>
+      <p style="font-size: 0.85rem; color: #aaa; margin-top: 8px;">Aponte a câmera do celular para o QR Code abaixo:</p>
+      
+      <div id="qrcode-target"></div>
+      
+      <p id="status-conexao" style="font-size: 0.85rem; color: #00e676; margin-bottom: 15px;">Aguardando leitura...</p>
+      
+      <button class="btn-close" onclick="fecharModalCamera()">Fechar</button>
+    </div>
+  </div>
+
+  <script>
+    const socket = io();
+    let currentRoomId = null;
+    let qtdTotalItens = 0;
+
+    // Gerador de Som de Bip
+    function playBeep() {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      gain.gain.setValueAtTime(0.1, ctx.currentTime);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.12);
+    }
+
+    function abrirModalCamera() {
+      const modal = document.getElementById('modal-qrcode');
+      const qrContainer = document.getElementById('qrcode-target');
+      qrContainer.innerHTML = '';
+
+      currentRoomId = 'CAIXA_' + Math.floor(1000 + Math.random() * 9000);
+      socket.emit('join-room', currentRoomId);
+
+      const scannerUrl = `${window.location.origin}/scanner.html?room=${currentRoomId}`;
+
+      new QRCode(qrContainer, {
+        text: scannerUrl,
+        width: 180,
+        height: 180
+      });
+
+      modal.style.display = 'flex';
+    }
+
+    function fecharModalCamera() {
+      document.getElementById('modal-qrcode').style.display = 'none';
+    }
+
+    // Ouve os códigos vindos do celular
+    socket.on('code-received', (data) => {
+      playBeep();
+
+      const codigo = typeof data === 'object' ? data.codigo : data;
+      const quantidade = typeof data === 'object' ? data.quantidade : 1;
+
+      qtdTotalItens += quantidade;
+      document.getElementById('total-itens').innerText = qtdTotalItens;
+      document.getElementById('last-code').innerText = `${codigo} (${quantidade}x)`;
+      document.getElementById('status-conexao').innerText = `Lido: ${codigo} [${quantidade}x]`;
+
+      const hora = new Date().toLocaleTimeString();
+      const row = document.createElement('tr');
+      row.innerHTML = `<td>${qtdTotalItens}</td><td><code>${codigo}</code></td><td><b>${quantidade}x</b></td><td>${hora}</td>`;
+      document.getElementById('carrinho-list').prepend(row);
+    });
+  </script>
+</body>
+</html>
