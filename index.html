@@ -3,231 +3,651 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PDV Pro - Sistema de Caixa</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css">
+  <title>PDV Simulador - Treinamento</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; background: #121212; color: #fff; margin: 0; padding: 15px; }
+    .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 15px; }
+    .nav-tabs { display: flex; gap: 10px; margin: 0; }
+    .tab-btn { background: #2a2a2a; color: #aaa; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold; }
+    .tab-btn.active { background: #00e676; color: #000; }
+    
+    .actions-bar { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 15px; align-items: center; background: #1e1e1e; padding: 12px; border-radius: 8px; }
+    button { padding: 10px 15px; font-weight: bold; border-radius: 6px; border: none; cursor: pointer; font-size: 0.9rem; }
+    .btn-camera { background: #00e676; color: #000; }
+    .btn-op { background: #ff9800; color: #000; }
+    .btn-cancel { background: #f44336; color: #fff; }
+    .btn-pay { background: #2196f3; color: #fff; font-size: 1.1rem; }
+    .btn-add { background: #9c27b0; color: #fff; }
+    
+    .grid { display: grid; grid-template-columns: 2fr 1fr; gap: 15px; }
+    @media(max-width: 768px) { .grid { grid-template-columns: 1fr; } }
+    .card { background: #1e1e1e; padding: 15px; border-radius: 10px; }
+    
+    table { width: 100%; border-collapse: collapse; margin-top: 5px; }
+    th, td { padding: 10px; border-bottom: 1px solid #333; text-align: left; font-size: 0.95rem; }
+    th { background: #2a2a2a; color: #00e676; }
+    
+    .total-box { text-align: right; font-size: 2rem; color: #00e676; font-weight: bold; margin-top: 15px; }
+    .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 9999; justify-content: center; align-items: center; }
+    .modal-content { background: #1e1e1e; padding: 25px; border-radius: 10px; text-align: center; max-width: 400px; width: 90%; }
+    #qrcode-target { display: inline-block; padding: 10px; background: #fff; border-radius: 6px; margin: 10px 0; }
+    input, select { width: 100%; padding: 10px; margin: 8px 0; background: #2a2a2a; border: 1px solid #444; color: #fff; border-radius: 5px; font-size: 1rem; }
+    .btn-close { background: #ff5252; color: #fff; margin-top: 10px; width: 100%; }
+    .section-view { display: none; }
+    .section-view.active { display: block; }
+    .btn-delete-item { background: #d32f2f; color: #fff; padding: 4px 8px; font-size: 0.8rem; border-radius: 4px; }
+
+    .bobina-termica {
+      background-color: #fffdfa;
+      color: #111;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 12px;
+      padding: 15px 12px;
+      border-top: 3px dashed #bbb;
+      border-bottom: 3px dashed #bbb;
+      text-align: left;
+      max-height: 350px;
+      overflow-y: auto;
+      margin: 10px 0;
+    }
+  </style>
 </head>
 <body>
-  <!-- Barra de Status Superior -->
-  <header class="status-bar">
-    <div class="brand"><span class="dot-online"></span> <strong>PDV PRO</strong> <small>v2.0</small></div>
-    <div class="status-group">
-      <div class="status-item"><span class="label">CAIXA:</span> <strong>01 (LIVRE)</strong></div>
-      <div class="status-item"><span class="label">OPERADOR:</span> <strong>ALUNO / TRAINEE</strong></div>
-      <div class="status-item badge-status">MEMÓRIA ATIVA</div>
+
+  <div class="header">
+    <h2>PDV Simulador <span style="font-size: 0.8rem; color: #00e676;">[Caixa Aberto]</span></h2>
+    <div class="nav-tabs">
+      <button class="tab-btn active" onclick="mudarAba('caixa', this)">🖥️ Frente de Caixa</button>
+      <button class="tab-btn" onclick="mudarAba('estoque', this)">📦 Controle de Estoque</button>
     </div>
-  </header>
+    <button class="btn-camera" onclick="abrirModalCamera()">📷 Ler via Celular</button>
+  </div>
 
-  <div class="pdv-container">
-    <!-- Painel Esquerdo -->
-    <main class="painel-esquerdo">
-      <div class="display-total">
-        <div class="display-label">TOTAL DA VENDA</div>
-        <div class="display-value">R$ <span id="total-val">0,00</span></div>
+  <!-- ABA 1: FRENTE DE CAIXA -->
+  <div id="view-caixa" class="section-view active">
+    <div class="actions-bar">
+      <!-- Formulário isolado para capturar o "Ir/Buscar" do teclado Android -->
+      <form onsubmit="processarCodigoManual(event)" style="flex: 1; min-width: 200px; margin: 0;">
+        <input type="text" id="input-manual" placeholder="Digite o Cód. de Barras e aperte Ir..." enterkeyhint="search" inputmode="numeric" style="margin: 0;">
+      </form>
+      
+      <div style="width: 150px;">
+        <input type="text" id="input-cpf" placeholder="CPF na Nota (opcional)" maxlength="14" oninput="mascaraCPF(this)" style="margin: 0;">
       </div>
+      <button class="btn-op" onclick="solicitarSupervisor('sangria')">💸 Sangria</button>
+      <button class="btn-op" onclick="abrirSuprimento()">💵 Suprimento</button>
+      <button class="btn-op" onclick="abrirConferenciaCega()">📊 Fechamento</button>
+      <button class="btn-cancel" onclick="solicitarSupervisor('cancelar_venda')">❌ Cancelar Venda</button>
+      <button class="btn-pay" onclick="finalizarVenda()">🛒 Finalizar Venda</button>
+    </div>
 
-      <div class="busca-box">
-        <label for="barcode-input">CÓDIGO DE BARRAS OU QUANTIDADE*CÓDIGO</label>
-        <div class="input-wrapper">
-          <input type="text" id="barcode-input" placeholder="Digite ou bipe o código (Ex: 3*7891)..." autofocus autocomplete="off">
-          <span class="input-hint">Pressione [ENTER]</span>
-        </div>
-      </div>
-
-      <!-- Botões Virtuais do Caixa -->
-      <nav class="atalhos-caixa">
-        <button type="button" class="btn-atalho primary" id="btn-f2"><kbd>F2</kbd> Finalizar / Pagamento</button>
-        <button type="button" class="btn-atalho" id="btn-f3"><kbd>F3</kbd> Cadastrar Produto</button>
-        <button type="button" class="btn-atalho danger" id="btn-f7"><kbd>F7</kbd> Cancelar Item</button>
-        <button type="button" class="btn-atalho" id="btn-f8"><kbd>F8</kbd> Relatório Z</button>
-        <button type="button" class="btn-atalho warning" id="btn-f9"><kbd>F9</kbd> Sangria</button>
-        <button type="button" class="btn-atalho outline" id="btn-esc"><kbd>ESC</kbd> Limpar Venda</button>
-      </nav>
-    </main>
-
-    <!-- Painel Direito: Cupom do Caixa -->
-    <aside class="painel-direito">
-      <div class="cupom-header-title">
-        <h2>CUPOM FISCAL EM ANDAMENTO</h2>
-        <span id="qtd-itens-badge" class="badge-count">0 itens</span>
-      </div>
-      <div class="tabela-wrapper">
-        <table id="tabela-itens">
+    <div class="grid">
+      <div class="card">
+        <h3>Itens da Venda Atual</h3>
+        <table>
           <thead>
             <tr>
               <th>#</th>
-              <th>CÓDIGO</th>
-              <th>DESCRIÇÃO</th>
-              <th>QTD</th>
-              <th>UNIT</th>
-              <th>TOTAL</th>
+              <th>Produto</th>
+              <th>Qtd</th>
+              <th>Subtotal</th>
+              <th>Ação</th>
             </tr>
           </thead>
-          <tbody id="lista-itens"></tbody>
+          <tbody id="carrinho-list">
+            <tr><td colspan="5" style="text-align: center; color: #777;">Caixa livre. Digite o código ou bipize um item.</td></tr>
+          </tbody>
         </table>
       </div>
-    </aside>
-  </div>
 
-  <!-- MODAL 1: Cadastro de Produto (F3) -->
-  <div id="modal-cadastro" class="modal-overlay hidden">
-    <div class="modal-box modal-lg">
-      <h2>CADASTRO E BANCO DE PRODUTOS</h2>
-      <form id="form-cad" class="grid-cad">
-        <div class="campo-modal">
-          <label>CÓDIGO DE BARRAS</label>
-          <input type="text" id="cad-codigo" placeholder="Ex: 7896" required>
+      <div class="card">
+        <h3>Resumo do Caixa</h3>
+        <p style="color: #aaa; margin: 5px 0;">Última Operação:</p>
+        <h4 id="last-code" style="color: #00e676; margin: 0 0 15px 0;">Nenhum</h4>
+        
+        <div style="background: #2a2a2a; padding: 10px; border-radius: 6px; font-size: 0.9rem;">
+          <p style="margin: 5px 0;">Fundo Inicial: R$ 150,00</p>
+          <p style="margin: 5px 0;">Sangrias: R$ <span id="val-sangria">0,00</span></p>
+          <p style="margin: 5px 0;">Suprimentos: R$ <span id="val-suprimento">0,00</span></p>
+          <p style="margin: 5px 0; color: #00e676;">Vendas Acumuladas: R$ <span id="val-acumulado-vendas">0,00</span></p>
         </div>
-        <div class="campo-modal">
-          <label>NOME DO PRODUTO</label>
-          <input type="text" id="cad-nome" placeholder="Ex: BISCOITO RECHEADO" required>
-        </div>
-        <div class="campo-modal">
-          <label>PREÇO DE VENDA (R$)</label>
-          <input type="number" id="cad-preco" step="0.01" placeholder="0.00" required>
-        </div>
-        <button type="button" id="btn-salvar-prod" class="btn-primary">SALVAR PRODUTO</button>
-      </form>
 
-      <div class="produtos-salvos-container">
-        <h3>PRODUTOS SALVOS NA MEMÓRIA (<span id="count-prod-salvos">0</span>)</h3>
-        <div class="tabela-salvos-wrapper">
-          <table>
-            <thead>
-              <tr>
-                <th>CÓDIGO</th>
-                <th>NOME</th>
-                <th>PREÇO</th>
-                <th>AÇÃO</th>
-              </tr>
-            </thead>
-            <tbody id="lista-produtos-memoria"></tbody>
-          </table>
+        <div class="total-box">
+          R$ <span id="total-valor">0,00</span>
         </div>
-      </div>
-
-      <div class="modal-acoes">
-        <button type="button" id="btn-fechar-cad" class="btn-secondary">FECHAR</button>
       </div>
     </div>
   </div>
 
-  <!-- MODAL 2: Fechamento e Pagamento (F2) -->
-  <div id="modal-pagamento" class="modal-overlay hidden">
-    <div class="modal-box">
-      <h2>PAGAMENTO E FECHAMENTO</h2>
-
-      <div class="campo-modal">
-        <label>TOTAL A PAGAR</label>
-        <div class="val-destaque" id="modal-total">R$ 0,00</div>
+  <!-- ABA 2: CONTROLE DE ESTOQUE -->
+  <div id="view-estoque" class="section-view">
+    <div class="card" style="margin-bottom: 15px;">
+      <h3>Cadastrar Novo Produto</h3>
+      <div style="display: grid; grid-template-columns: 1fr 2fr 1fr 1fr 1fr auto; gap: 10px; align-items: end;">
+        <div>
+          <label style="font-size: 0.8rem; color:#aaa">Cód. Barras</label>
+          <input type="text" id="novo-cod" placeholder="Ex: 78999">
+        </div>
+        <div>
+          <label style="font-size: 0.8rem; color:#aaa">Nome do Produto</label>
+          <input type="text" id="novo-nome" placeholder="Ex: Café 500g">
+        </div>
+        <div>
+          <label style="font-size: 0.8rem; color:#aaa">Preço Varejo</label>
+          <input type="number" id="novo-preco" step="0.01" placeholder="0.00">
+        </div>
+        <div>
+          <label style="font-size: 0.8rem; color:#aaa">Qtd Atacado (Min)</label>
+          <input type="number" id="novo-atacado-min" placeholder="5">
+        </div>
+        <div>
+          <label style="font-size: 0.8rem; color:#aaa">Preço Atacado</label>
+          <input type="number" id="novo-preco-atacado" step="0.01" placeholder="0.00">
+        </div>
+        <button class="btn-add" style="height: 42px;" onclick="cadastrarProduto()">Adicionar</button>
       </div>
+    </div>
 
-      <div class="campo-modal">
-        <label>FORMA DE PAGAMENTO</label>
-        <select id="modal-forma">
-          <option value="DINHEIRO">💵 1 - Dinheiro</option>
-          <option value="CARTAO_CREDITO">💳 2 - Cartão de Crédito</option>
-          <option value="CARTAO_DEBITO">💳 3 - Cartão de Débito</option>
-          <option value="PIX">📱 4 - PIX</option>
-        </select>
-      </div>
-
-      <div class="campo-modal" id="box-recebido">
-        <label>VALOR RECEBIDO (R$)</label>
-        <input type="number" id="input-recebido" step="0.01" placeholder="0.00" autocomplete="off">
-      </div>
-
-      <div class="campo-modal" id="box-troco">
-        <label>TROCO A DEVOLVER</label>
-        <div class="val-destaque troco" id="modal-troco">R$ 0,00</div>
-      </div>
-
-      <div id="simulador-tef" class="tef-screen hidden">
-        <div class="spinner"></div>
-        <p id="tef-status">CONECTANDO À MAQUININHA...</p>
-      </div>
-
-      <div class="modal-acoes">
-        <button type="button" id="btn-confirmar-venda" class="btn-primary">CONFIRMAR PAGAMENTO</button>
-        <button type="button" id="btn-cancelar-modal" class="btn-secondary">VOLTAR</button>
-      </div>
+    <div class="card">
+      <h3>Produtos Cadastrados no Sistema</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Cód. Barras</th>
+            <th>Produto</th>
+            <th>Preço Varejo</th>
+            <th>Regra Atacado</th>
+            <th>Estoque Atual</th>
+          </tr>
+        </thead>
+        <tbody id="estoque-list">
+        </tbody>
+      </table>
     </div>
   </div>
 
-  <!-- MODAL 3: Recibo Térmico -->
-  <div id="modal-cupom" class="modal-overlay hidden">
-    <div class="cupom-termico">
-      <div class="cupom-header">
-        <h3>MERCADO SIMULADOR S/A</h3>
-        <p>RUA DO TREINAMENTO, 123 - CENTRO</p>
-        <p>CNPJ: 00.000.000/0001-00</p>
-        <div class="divider-line"></div>
-        <p class="bold">CUPOM FISCAL SIMULADO</p>
-        <div class="divider-line"></div>
-      </div>
-      <div id="cupom-conteudo" class="cupom-corpo"></div>
-      <div class="cupom-footer">
-        <div class="divider-line"></div>
-        <p id="cupom-total-txt" class="total-cupom">TOTAL: R$ 0,00</p>
-        <p id="cupom-forma-txt">FORMA: DINHEIRO</p>
-        <p id="cupom-troco-txt">TROCO: R$ 0,00</p>
-        <div class="divider-line"></div>
-        <p>OBRIGADO E VOLTE SEMPRE!</p>
-      </div>
-      <button type="button" id="btn-fechar-cupom">CONCLUIR E NOVO CAIXA</button>
+  <!-- Modal de Câmera (QR Code) -->
+  <div id="modal-qrcode" class="modal-overlay">
+    <div class="modal-content">
+      <h3>Parear Leitor Mobile</h3>
+      <p style="font-size: 0.8rem; color: #aaa;">Aponte a câmera do celular:</p>
+      <div id="qrcode-target"></div>
+      <p style="font-size: 0.85rem; color: #00e676;">Conectado e pronto!</p>
+      <button class="btn-close" onclick="fecharModalCamera()">Fechar</button>
     </div>
   </div>
 
-  <!-- MODAL 4: Relatório Z (F8) -->
-  <div id="modal-relatorio" class="modal-overlay hidden">
-    <div class="modal-box relatorio-box">
-      <h2>RELATÓRIO Z - FECHAMENTO DE CAIXA</h2>
+  <!-- Modal Supervisor (PIN) -->
+  <div id="modal-supervisor" class="modal-overlay">
+    <div class="modal-content">
+      <h3 style="color: #ff9800;">🔒 PIN do Supervisor</h3>
+      <p id="sup-motivo" style="font-size: 0.85rem; color: #aaa;">Operação restrita. Digite o PIN de autorização:</p>
+      <input type="password" id="input-pin-sup" placeholder="Senha/PIN (ex: 1234)">
+      <button class="btn-camera" style="width: 100%; margin-top: 10px;" onclick="confirmarPinSupervisor()">Autorizar</button>
+      <button class="btn-close" onclick="fecharModalSupervisor()">Cancelar</button>
+    </div>
+  </div>
+
+  <!-- Modal Conferência Cega (Fechamento Z) -->
+  <div id="modal-conferencia" class="modal-overlay">
+    <div class="modal-content">
+      <h3 style="color: #ff9800;">📊 Fechamento - Conferência Cega</h3>
+      <p style="font-size: 0.85rem; color: #aaa;">Informe o valor em dinheiro físico contado na gaveta:</p>
+      <input type="number" id="input-gaveta-contado" placeholder="R$ 0,00" step="0.01">
+      <button class="btn-camera" style="width: 100%; margin-top: 10px;" onclick="processarFechamentoZ()">Gerar Relatório Z</button>
+      <button class="btn-close" onclick="fecharModalConferencia()">Voltar</button>
+    </div>
+  </div>
+
+  <!-- Modal de Pagamento / TEF Simulado -->
+  <div id="modal-pagamento" class="modal-overlay">
+    <div class="modal-content">
+      <h3 style="color: #2196f3;">Finalizar Pagamento</h3>
+      <p>Total a Pagar: <b id="pag-total" style="color: #00e676; font-size: 1.2rem;">R$ 0,00</b></p>
       
-      <div class="relatorio-resumo">
-        <div class="rel-card"><span>Vendas Realizadas:</span> <strong id="rel-qtd-vendas">0</strong></div>
-        <div class="rel-card destaque"><span>FATURAMENTO TOTAL:</span> <strong id="rel-total-geral">R$ 0,00</strong></div>
+      <label style="text-align: left; display: block;">Forma de Pagamento:</label>
+      <select id="tipo-pgto" onchange="mudarFormaPgto()">
+        <option value="dinheiro">Dinheiro</option>
+        <option value="credito">Cartão de Crédito (TEF)</option>
+        <option value="debito">Cartão de Débito (TEF)</option>
+        <option value="pix">PIX (Instantâneo)</option>
+      </select>
+
+      <div id="area-dinheiro" style="margin-top: 15px;">
+        <label style="text-align: left; display: block;">Valor Recebido em Dinheiro:</label>
+        <input type="number" id="valor-recebido" placeholder="0.00" oninput="calcularTroco()">
+        <p style="font-size: 1rem; margin: 5px 0; text-align: left;">Troco: <b id="valor-troco" style="color: #ff9800;">R$ 0,00</b></p>
       </div>
 
-      <div class="relatorio-detalhe">
-        <h3>FLUXO DE CAIXA EM ESPÉCIE</h3>
-        <div class="rel-item"><span>💵 Dinheiro Recebido:</span> <strong id="rel-dinheiro">R$ 0,00</strong></div>
-        <div class="rel-item subtracao"><span>🔻 (-) Sangrias Realizadas:</span> <strong id="rel-sangria">R$ 0,00</strong></div>
-        <div class="rel-item gaveta"><span>💰 SALDO EM GAVETA:</span> <strong id="rel-saldo-gaveta">R$ 0,00</strong></div>
-
-        <h3 class="mt-10">OUTRAS FORMAS DE PAGAMENTO</h3>
-        <div class="rel-item"><span>💳 Cartão Crédito:</span> <strong id="rel-credito">R$ 0,00</strong></div>
-        <div class="rel-item"><span>💳 Cartão Débito:</span> <strong id="rel-debito">R$ 0,00</strong></div>
-        <div class="rel-item"><span>📱 PIX:</span> <strong id="rel-pix">R$ 0,00</strong></div>
-      </div>
-
-      <div class="modal-acoes col-vertical">
-        <button type="button" id="btn-zerar-caixa" class="btn-warning">FECHAR TURNO / ZERAR HOJE</button>
-        <button type="button" id="btn-fechar-relatorio" class="btn-secondary">VOLTAR</button>
-      </div>
+      <button class="btn-camera" style="width: 100%; margin-top: 15px; padding: 12px;" onclick="concluirPagamento()">Confirmar e Emitir NFC-e</button>
+      <button class="btn-close" onclick="fecharPagamento()">Cancelar</button>
     </div>
   </div>
 
-  <!-- MODAL 5: Sangria (F9) -->
-  <div id="modal-sangria" class="modal-overlay hidden">
-    <div class="modal-box">
-      <h2>SANGRIA DE CAIXA (RETIRADA)</h2>
-      <div class="campo-modal">
-        <label>VALOR DA RETIRADA (R$)</label>
-        <input type="number" id="input-sangria-val" step="0.01" placeholder="0.00" autofocus>
-      </div>
-      <div class="campo-modal">
-        <label>MOTIVO / OBSERVAÇÃO</label>
-        <input type="text" id="input-sangria-obs" placeholder="Ex: Envio de numerário ao cofre">
-      </div>
-      <div class="modal-acoes">
-        <button type="button" id="btn-confirmar-sangria" class="btn-warning">CONFIRMAR SANGRIA</button>
-        <button type="button" id="btn-fechar-sangria" class="btn-secondary">CANCELAR</button>
-      </div>
+  <!-- Modal Bobina Térmica (Cupom Fiscal NFC-e) -->
+  <div id="modal-cupom" class="modal-overlay">
+    <div class="modal-content" style="max-width: 360px;">
+      <h3 style="color: #00e676; margin-bottom: 5px;">Venda Concluída!</h3>
+      <div class="bobina-termica" id="conteudo-cupom"></div>
+      <button class="btn-camera" style="width: 100%; margin-top: 10px;" onclick="fecharModalCupom()">Fechar e Novo Caixa</button>
     </div>
   </div>
 
-  <script src="app.js"></script>
+  <script>
+    const socket = io();
+    let currentRoomId = null;
+    let itensVenda = [];
+    let totalGeral = 0;
+    let totalSangria = 0;
+    let totalSuprimento = 0;
+    let totalVendasAcumuladas = 0;
+    let acaoPendenteSupervisor = null;
+    let itemParaCancelarIndex = null;
+
+    let catalogoProdutos = {
+      "78910001": { nome: "Refrigerante Coca-Cola 2L", preco: 9.50, atacadoMin: 3, precoAtacado: 8.50, estoque: 45, balanca: false },
+      "78920002": { nome: "Arroz Tipo 1 - 5kg", preco: 27.90, atacadoMin: 5, precoAtacado: 24.90, estoque: 20, balanca: false },
+      "78930003": { nome: "Feijão Carioca 1kg", preco: 8.50, atacadoMin: 4, precoAtacado: 7.20, estoque: 30, balanca: false },
+      "78940004": { nome: "Leite Integral UHT 1L", preco: 5.20, atacadoMin: 12, precoAtacado: 4.80, estoque: 60, balanca: false },
+      "00001": { nome: "Pão Francês (Kg)", preco: 18.90, atacadoMin: 0, precoAtacado: 0, estoque: 100, balanca: true },
+      "00002": { nome: "Queijo Mussarela (Kg)", preco: 49.90, atacadoMin: 0, precoAtacado: 0, estoque: 50, balanca: true }
+    };
+
+    function mudarAba(aba, btn) {
+      document.querySelectorAll('.section-view').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+      document.getElementById('view-' + aba).classList.add('active');
+      btn.classList.add('active');
+      if(aba === 'estoque') atualizarTabelaEstoque();
+    }
+
+    function playBeep(tipo = 'bip') {
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        if (ctx.state === 'suspended') ctx.resume();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        if (tipo === 'bip') {
+          osc.frequency.setValueAtTime(1800, ctx.currentTime);
+          gain.gain.setValueAtTime(0.1, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.08);
+          osc.start(); osc.stop(ctx.currentTime + 0.08);
+        } else if (tipo === 'erro') {
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(160, ctx.currentTime);
+          gain.gain.setValueAtTime(0.2, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.25);
+          osc.start(); osc.stop(ctx.currentTime + 0.25);
+        } else if (tipo === 'gaveta') {
+          osc.type = 'square';
+          osc.frequency.setValueAtTime(600, ctx.currentTime);
+          gain.gain.setValueAtTime(0.12, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.15);
+          osc.start(); osc.stop(ctx.currentTime + 0.15);
+        }
+      } catch(e) {}
+    }
+
+    function mascaraCPF(input) {
+      let v = input.value.replace(/\D/g, "");
+      if (v.length > 11) v = v.substring(0, 11);
+      v = v.replace(/(\d{3})(\d)/, "$1.$2");
+      v = v.replace(/(\d{3})(\d)/, "$1.$2");
+      v = v.replace(/(\d{3})(\d{1,2})$/, "$1-$2");
+      input.value = v;
+    }
+
+    function abrirModalCamera() {
+      const modal = document.getElementById('modal-qrcode');
+      const qrContainer = document.getElementById('qrcode-target');
+      qrContainer.innerHTML = '';
+      currentRoomId = 'CAIXA_' + Math.floor(1000 + Math.random() * 9000);
+      socket.emit('join-room', currentRoomId);
+      new QRCode(qrContainer, { text: `${window.location.origin}/scanner.html?room=${currentRoomId}`, width: 170, height: 170 });
+      modal.style.display = 'flex';
+    }
+
+    function fecharModalCamera() { document.getElementById('modal-qrcode').style.display = 'none'; }
+
+    socket.on('code-received', (data) => {
+      const codigo = typeof data === 'object' ? data.codigo : data;
+      adicionarItemPorCodigo(codigo, 1);
+    });
+
+    // Função ajustada para interceptar a tecla "Ir/Buscar" no Android sem mudar para o CPF
+    function processarCodigoManual(event) {
+      if (event) event.preventDefault();
+      const input = document.getElementById('input-manual');
+      const codigo = input.value.trim();
+      if (codigo) {
+        adicionarItemPorCodigo(codigo, 1);
+        input.value = '';
+      }
+      // Mantém o foco no campo de código de barras para digitação contínua
+      setTimeout(() => input.focus(), 50);
+    }
+
+    function adicionarItemPorCodigo(codigo, qtd) {
+      let produtoInfo = null;
+      let precoFinal = 0;
+      let qtdAdicionar = qtd;
+      let detalheNome = "";
+
+      if (codigo.startsWith('2') && codigo.length === 13) {
+        const codItem = codigo.substring(1, 6);
+        const valorCentavos = parseInt(codigo.substring(6, 12), 10) / 100;
+
+        if (catalogoProdutos[codItem]) {
+          const prodBase = catalogoProdutos[codItem];
+          produtoInfo = prodBase;
+          precoFinal = valorCentavos;
+          qtdAdicionar = 1;
+          detalheNome = ` (Bal. R$ ${valorCentavos.toFixed(2)})`;
+        }
+      }
+
+      if (!produtoInfo) {
+        produtoInfo = catalogoProdutos[codigo];
+        if (!produtoInfo) {
+          const encontrado = Object.values(catalogoProdutos).find(p => p.nome.toLowerCase().includes(codigo.toLowerCase()));
+          if (encontrado) {
+            produtoInfo = encontrado;
+          } else {
+            produtoInfo = { nome: `Produto Genérico (${codigo})`, preco: 10.00, atacadoMin: 0, precoAtacado: 0, estoque: 99 };
+          }
+        }
+        precoFinal = produtoInfo.preco * qtdAdicionar;
+      }
+
+      playBeep('bip');
+
+      let itemExistente = itensVenda.find(i => i.codigo === codigo);
+      if (itemExistente && !produtoInfo.balanca) {
+        itemExistente.qtd += qtdAdicionar;
+        
+        if (produtoInfo.atacadoMin > 0 && itemExistente.qtd >= produtoInfo.atacadoMin) {
+          itemExistente.precoUnit = produtoInfo.precoAtacado;
+          itemExistente.isAtacado = true;
+        } else {
+          itemExistente.precoUnit = produtoInfo.preco;
+          itemExistente.isAtacado = false;
+        }
+        itemExistente.subtotal = itemExistente.qtd * itemExistente.precoUnit;
+      } else {
+        itensVenda.push({
+          codigo,
+          nome: produtoInfo.nome + detalheNome,
+          qtd: qtdAdicionar,
+          precoUnit: produtoInfo.preco,
+          subtotal: precoFinal,
+          isAtacado: false,
+          atacadoMin: produtoInfo.atacadoMin,
+          precoAtacado: produtoInfo.precoAtacado
+        });
+      }
+
+      atualizarTelaCarrinho();
+      document.getElementById('last-code').innerText = `${produtoInfo.nome} (+${qtdAdicionar}x)`;
+    }
+
+    function solicitarSupervisor(acao, index = null) {
+      if (acao === 'cancelar_venda' && itensVenda.length === 0) {
+        alert('Nenhuma venda em andamento para cancelar.');
+        return;
+      }
+      acaoPendenteSupervisor = acao;
+      itemParaCancelarIndex = index;
+      document.getElementById('sup-motivo').innerText = 
+        acao === 'sangria' ? "Autorização de Supervisor para SANGRIA" :
+        acao === 'cancelar_item' ? `Autorização para CANCELAR ITEM #${index + 1}` :
+        "Autorização para CANCELAR VENDA COMPLETA";
+
+      document.getElementById('modal-supervisor').style.display = 'flex';
+      document.getElementById('input-pin-sup').value = '';
+      document.getElementById('input-pin-sup').focus();
+    }
+
+    function confirmarPinSupervisor() {
+      const pin = document.getElementById('input-pin-sup').value;
+      if (pin === '1234') {
+        playBeep('bip');
+        fecharModalSupervisor();
+        if (acaoPendenteSupervisor === 'sangria') {
+          executarSangria();
+        } else if (acaoPendenteSupervisor === 'cancelar_venda') {
+          executarCancelarVenda();
+        } else if (acaoPendenteSupervisor === 'cancelar_item') {
+          executarCancelarItem(itemParaCancelarIndex);
+        }
+      } else {
+        playBeep('erro');
+        alert('PIN incorreto! Acesso negado pelo supervisor.');
+      }
+    }
+
+    function fecharModalSupervisor() { document.getElementById('modal-supervisor').style.display = 'none'; }
+
+    function executarCancelarItem(index) {
+      const itemRemovido = itensVenda.splice(index, 1)[0];
+      document.getElementById('last-code').innerText = `Cancelado: ${itemRemovido.nome}`;
+      atualizarTelaCarrinho();
+    }
+
+    function executarCancelarVenda() {
+      itensVenda = [];
+      document.getElementById('last-code').innerText = 'Venda Cancelada Totalmente';
+      atualizarTelaCarrinho();
+    }
+
+    function atualizarTelaCarrinho() {
+      const tbody = document.getElementById('carrinho-list');
+      tbody.innerHTML = '';
+      totalGeral = 0;
+
+      if (itensVenda.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: #777;">Caixa livre. Digite o código ou bipize um item.</td></tr>`;
+        document.getElementById('total-valor').innerText = '0,00';
+        return;
+      }
+
+      itensVenda.forEach((item, idx) => {
+        totalGeral += item.subtotal;
+        const tagAtacado = item.isAtacado ? ' <span style="color:#00e676; font-size:0.75rem;">[ATACADO]</span>' : '';
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${idx + 1}</td>
+          <td><b>${item.nome}</b>${tagAtacado}<br><small style="color:#aaa">Cód: ${item.codigo} | R$ ${item.precoUnit.toFixed(2)}</small></td>
+          <td>${item.qtd}x</td>
+          <td>R$ ${item.subtotal.toFixed(2)}</td>
+          <td><button class="btn-delete-item" onclick="solicitarSupervisor('cancelar_item', ${idx})">Remover</button></td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      document.getElementById('total-valor').innerText = totalGeral.toFixed(2);
+    }
+
+    function atualizarTabelaEstoque() {
+      const tbody = document.getElementById('estoque-list');
+      tbody.innerHTML = '';
+      for (let [cod, prod] of Object.entries(catalogoProdutos)) {
+        const regraAtacado = prod.atacadoMin > 0 ? `${prod.atacadoMin}+ un por R$ ${prod.precoAtacado.toFixed(2)}` : 'N/A';
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td><b>${cod}</b></td>
+          <td>${prod.nome}</td>
+          <td>R$ ${prod.preco.toFixed(2)}</td>
+          <td style="color:#ff9800">${regraAtacado}</td>
+          <td style="color: ${prod.estoque <= 5 ? '#ff5252' : '#00e676'}">${prod.estoque} un</td>
+        `;
+        tbody.appendChild(tr);
+      }
+    }
+
+    function cadastrarProduto() {
+      const cod = document.getElementById('novo-cod').value.trim();
+      const nome = document.getElementById('novo-nome').value.trim();
+      const preco = parseFloat(document.getElementById('novo-preco').value);
+      const atacadoMin = parseInt(document.getElementById('novo-atacado-min').value) || 0;
+      const precoAtacado = parseFloat(document.getElementById('novo-preco-atacado').value) || 0;
+      const estoque = 50;
+
+      if (!cod || !nome || isNaN(preco)) {
+        alert('Preencha pelo menos Código, Nome e Preço do produto.');
+        return;
+      }
+
+      catalogoProdutos[cod] = { nome, preco, atacadoMin, precoAtacado, estoque, balanca: false };
+      alert(`Produto "${nome}" cadastrado no estoque!`);
+      
+      document.getElementById('novo-cod').value = '';
+      document.getElementById('novo-nome').value = '';
+      document.getElementById('novo-preco').value = '';
+      document.getElementById('novo-atacado-min').value = '';
+      document.getElementById('novo-preco-atacado').value = '';
+      atualizarTabelaEstoque();
+    }
+
+    function finalizarVenda() {
+      if (itensVenda.length === 0) {
+        playBeep('erro');
+        alert('Atenção: Nenhum item lançado na venda atual!');
+        return;
+      }
+      document.getElementById('pag-total').innerText = `R$ ${totalGeral.toFixed(2)}`;
+      document.getElementById('valor-recebido').value = totalGeral.toFixed(2);
+      document.getElementById('valor-troco').innerText = 'R$ 0,00';
+      document.getElementById('modal-pagamento').style.display = 'flex';
+    }
+
+    function fecharPagamento() { document.getElementById('modal-pagamento').style.display = 'none'; }
+
+    function mudarFormaPgto() {
+      const tipo = document.getElementById('tipo-pgto').value;
+      document.getElementById('area-dinheiro').style.display = (tipo === 'dinheiro') ? 'block' : 'none';
+    }
+
+    function calcularTroco() {
+      const recebido = parseFloat(document.getElementById('valor-recebido').value) || 0;
+      const troco = recebido - totalGeral;
+      document.getElementById('valor-troco').innerText = troco >= 0 ? `R$ ${troco.toFixed(2)}` : 'R$ 0,00 (Valor Insuficiente)';
+    }
+
+    function concluirPagamento() {
+      playBeep('gaveta');
+      const tipo = document.getElementById('tipo-pgto').value;
+      const cpf = document.getElementById('input-cpf').value.trim() || "Consumidor Não Identificado";
+      const recebido = parseFloat(document.getElementById('valor-recebido').value) || totalGeral;
+      const troco = Math.max(0, recebido - totalGeral);
+
+      let dataHora = new Date().toLocaleString('pt-BR');
+      let htmlCupom = `
+        <div style="text-align:center; font-weight:bold;">SIMULADOR SUPERMERCADO LTDA</div>
+        <div style="text-align:center; font-size:10px;">AV. PRINCIPAL, 1000 - CAIXA 01</div>
+        <div style="text-align:center; font-size:10px;">CNPJ: 00.000.000/0001-00</div>
+        <hr style="border:0; border-top:1px dashed #444; margin: 5px 0;">
+        <div style="font-size:11px;">CUPOM FISCAL ELETRÔNICO (NFC-e)</div>
+        <div style="font-size:10px;">CPF Consumidor: ${cpf}</div>
+        <div style="font-size:10px;">Data: ${dataHora}</div>
+        <hr style="border:0; border-top:1px dashed #444; margin: 5px 0;">
+      `;
+
+      itensVenda.forEach((item, i) => {
+        htmlCupom += `
+          <div style="display:flex; justify-content:space-between; font-size:11px;">
+            <span>${i+1}. ${item.nome.substring(0, 18)}</span>
+            <span>R$ ${item.subtotal.toFixed(2)}</span>
+          </div>
+          <div style="font-size:10px; color:#555;">${item.qtd}x R$ ${item.precoUnit.toFixed(2)}</div>
+        `;
+      });
+
+      htmlCupom += `
+        <hr style="border:0; border-top:1px dashed #444; margin: 5px 0;">
+        <div style="display:flex; justify-content:space-between; font-weight:bold; font-size:13px;">
+          <span>TOTAL:</span>
+          <span>R$ ${totalGeral.toFixed(2)}</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; font-size:10px;">
+          <span>Forma Pgto (${tipo.toUpperCase()}):</span>
+          <span>R$ ${recebido.toFixed(2)}</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; font-size:10px;">
+          <span>Troco:</span>
+          <span>R$ ${troco.toFixed(2)}</span>
+        </div>
+        <hr style="border:0; border-top:1px dashed #444; margin: 5px 0;">
+        <div style="text-align:center; font-size:10px;">|||||||||||||||||||||||||||||||||||</div>
+        <div style="text-align:center; font-size:9px;">PROTOCOLO SEFAZ: ${Math.floor(Math.random()*1000000000)}</div>
+      `;
+
+      document.getElementById('conteudo-cupom').innerHTML = htmlCupom;
+      
+      totalVendasAcumuladas += totalGeral;
+      document.getElementById('val-acumulado-vendas').innerText = totalVendasAcumuladas.toFixed(2);
+
+      fecharPagamento();
+      document.getElementById('modal-cupom').style.display = 'flex';
+    }
+
+    function fecharModalCupom() {
+      document.getElementById('modal-cupom').style.display = 'none';
+      itensVenda = [];
+      document.getElementById('input-cpf').value = '';
+      document.getElementById('last-code').innerText = 'Venda Concluída';
+      atualizarTelaCarrinho();
+    }
+
+    function executarSangria() {
+      const val = prompt('Informe o valor da Sangria (Retirada de Caixa):');
+      if (val && !isNaN(val)) {
+        totalSangria += parseFloat(val);
+        document.getElementById('val-sangria').innerText = totalSangria.toFixed(2);
+        alert(`Sangria de R$ ${parseFloat(val).toFixed(2)} realizada com sucesso.`);
+      }
+    }
+
+    function abrirSuprimento() {
+      const val = prompt('Informe o valor do Suprimento (Troco inicial/Entrada):');
+      if (val && !isNaN(val)) {
+        totalSuprimento += parseFloat(val);
+        document.getElementById('val-suprimento').innerText = totalSuprimento.toFixed(2);
+        alert(`Suprimento de R$ ${parseFloat(val).toFixed(2)} registrado.`);
+      }
+    }
+
+    function abrirConferenciaCega() {
+      document.getElementById('modal-conferencia').style.display = 'flex';
+      document.getElementById('input-gaveta-contado').value = '';
+      document.getElementById('input-gaveta-contado').focus();
+    }
+
+    function fecharModalConferencia() { document.getElementById('modal-conferencia').style.display = 'none'; }
+
+    function processarFechamentoZ() {
+      const contado = parseFloat(document.getElementById('input-gaveta-contado').value);
+      if (isNaN(contado)) {
+        alert('Por favor, informe a contagem da gaveta.');
+        return;
+      }
+
+      const fundoInicial = 150.00;
+      const esperado = fundoInicial + totalSuprimento - totalSangria + totalVendasAcumuladas;
+      const diferenca = contado - esperado;
+      const resultadoTxt = diferenca === 0 ? "CAIXA EXATO (Sem quebra)" : 
+                           diferenca > 0 ? `SOBRA DE CAIXA: +R$ ${diferenca.toFixed(2)}` : 
+                           `QUEBRA DE CAIXA (FALTA): R$ ${diferenca.toFixed(2)}`;
+
+      alert(`=== RELATÓRIO Z (FECHAMENTO DE TURNO) ===\n\nFundo Inicial: R$ ${fundoInicial.toFixed(2)}\nSuprimentos: R$ ${totalSuprimento.toFixed(2)}\nSangrias: R$ ${totalSangria.toFixed(2)}\nVendas Totais: R$ ${totalVendasAcumuladas.toFixed(2)}\n---------------------------------\nEsperado no Caixa: R$ ${esperado.toFixed(2)}\nContado pelo Operador: R$ ${contado.toFixed(2)}\n\nStatus: ${resultadoTxt}`);
+
+      fecharModalConferencia();
+    }
+  </script>
 </body>
 </html>
